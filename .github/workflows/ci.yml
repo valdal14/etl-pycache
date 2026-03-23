@@ -1,0 +1,33 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          
+      - name: Install Poetry
+        run: curl -sSL https://install.python-poetry.org | python3 -
+        
+      - name: Install dependencies
+        run: poetry install
+        
+      - name: Lint with Ruff
+        run: poetry run python3 -m ruff check .
+        
+      - name: Check formatting with Ruff
+        run: poetry run python3 -m ruff format --check .
+        
+      - name: Run tests
+        run: poetry run python3 -m pytest
