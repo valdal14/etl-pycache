@@ -1,6 +1,6 @@
 import pytest
 
-from etl_pycache.interfaces import BaseCache
+from etl_pycache.interfaces import BaseCache, PayloadType
 
 
 def test_base_cache_cannot_be_instantiated():
@@ -15,7 +15,7 @@ def test_dummy_cache_missing_methods_raises_error():
 
     class IncompleteCache(BaseCache):
         # We only implement 'get', forgetting 'set' and 'delete'
-        def get(self, key: str) -> str | None:
+        def get(self, key: str) -> PayloadType | None:
             return None
 
     with pytest.raises(TypeError):
