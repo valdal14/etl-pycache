@@ -16,6 +16,7 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 * **Idempotency:** Guarantees that rerunning a failed pipeline won't duplicate extraction tasks.
 * **Cost Efficiency:** Prevents paying for the exact same compute or API queries twice during a retry.
 * **Developer Velocity:** Rapidly debug downstream load operations without waiting for upstream transformations to finish.
+* **Polymorphic By Design:** Natively supports strings, bytes, dictionaries, lists, and byte streams without requiring manual serialization before caching.
 
 ## Core Interface
 The library enforces a strict contract for all cache implementations to ensure predictability across different environments:
