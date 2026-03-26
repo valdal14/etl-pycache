@@ -98,6 +98,87 @@ def test_set_throws_NotImplementedError(setup_local_cache):
         sut.cache.set(sut.key, payload)
 
 
+# NOTE: - Get method tests ########################################################################
+
+
+def test_get_returns_none(setup_local_cache):
+    """Not setting the payload produces a None result"""
+    sut = make_sut(setup_local_cache)
+    res = sut.cache.get(sut.key)
+    assert res is None
+
+
+def test_get_returns_string(setup_local_cache):
+    payload = "Hello World!"
+    sut = make_sut(setup_local_cache, "str_key", payload)
+
+    sut.cache.set(sut.key, payload)
+    res = sut.cache.get("str_key")
+
+    assert isinstance(res, str)
+    assert res == payload
+
+
+def test_get_returns_bytes(setup_local_cache):
+    raw_bytes = b"\x80\x04\x95"
+    sut = make_sut(setup_local_cache, "binary_key", raw_bytes)
+
+    sut.cache.set(sut.key, raw_bytes)
+    res = sut.cache.get("binary_key")
+
+    # Prove it triggered the UnicodeDecodeError and fell back to bytes
+    assert isinstance(res, bytes)
+    # Prove the data wasn't corrupted
+    assert res == raw_bytes
+
+
+def test_get_returns_list(setup_local_cache):
+    payload = ["Hello", "World", "!"]
+    sut = make_sut(setup_local_cache, "list_key", payload)
+
+    sut.cache.set(sut.key, payload)
+    res = sut.cache.get("list_key")
+
+    assert isinstance(res, list)
+    assert res == payload
+
+
+def test_get_returns_dic(setup_local_cache):
+    sut = make_sut(setup_local_cache)
+
+    sut.cache.set(sut.key, sut.payload)
+    res = sut.cache.get(sut.key)
+
+    assert isinstance(res, dict)
+    assert res == sut.payload
+
+
+# NOTE: - Delete method tests #####################################################################
+
+
+def test_delete_returns_none(setup_local_cache):
+    sut = make_sut(setup_local_cache)
+    res = sut.cache.delete(sut.key)
+    assert res is None
+
+
+def test_delete_successfully_delete_cached_file(setup_local_cache):
+    sut = make_sut(setup_local_cache)
+    sut.cache.set(sut.key, sut.payload)
+
+    # First assert it was created
+    res = sut.cache.get(sut.key)
+    assert isinstance(res, dict)
+    assert res == sut.payload
+
+    # Execute the deletion
+    sut.cache.delete(sut.key)
+
+    # Prove it is no longer available by trying to get it again
+    deleted_res = sut.cache.get(sut.key)
+    assert deleted_res is None
+
+
 # NOTE: - Test's Helpers ##########################################################################
 @dataclass
 class MockedCache:

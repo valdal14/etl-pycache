@@ -18,7 +18,17 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 * **Developer Velocity:** Rapidly debug downstream load operations without waiting for upstream transformations to finish.
 * **Polymorphic By Design:** Natively supports strings, bytes, dictionaries, lists, and byte streams without requiring manual serialization before caching.
 
-## Core Interface
+## 🚦 Roadmap
+
+- [x] Define abstract base interface and project scaffolding.
+- [ ] Implement local disk caching logic with string serialization.
+- [ ] Implement LRU (Least Recently Used) eviction policies.
+- [ ] Add concurrency control (file locking) for parallel workers.
+- [ ] Implement compression for large text/XML payloads.
+
+---
+
+## 👨🏼‍💻 Core Interface
 The library enforces a strict contract for all cache implementations to ensure predictability across different environments:
 
 ```python
@@ -32,13 +42,32 @@ cache.delete(key="payload_123")
 
 ---
 
-## 🚦 Roadmap
+## 💾 Usage: LocalDiskCache
 
-- [x] Define abstract base interface and project scaffolding.
-- [ ] Implement local disk caching logic with string serialization.
-- [ ] Implement LRU (Least Recently Used) eviction policies.
-- [ ] Add concurrency control (file locking) for parallel workers.
-- [ ] Implement compression for large text/XML payloads.
+The `LocalDiskCache` is a secure, disk-backed implementation that automatically handles serialization for you. It uses SHA-256 hashing to prevent directory traversal attacks, meaning your cache keys are always safe to use as filenames.
+
+### Polymorphic Type Support
+You don't need to manually stringify your data. The cache automatically inspects and routes your payloads:
+* **`str` & `bytes`**: Written directly to disk.
+* **`dict` & `list`**: Automatically serialized to JSON on `set()`, and parsed back into Python collections on `get()`.
+
+```python
+from etl_pycache.local_cache import LocalDiskCache
+
+# 1. Initialize the cache (Defaults to a hidden '.cache' folder in your project)
+cache = LocalDiskCache(cache_dir=".cache")
+
+# 2. Cache a dictionary directly! No json.dumps() needed.
+pipeline_data = {"records_processed": 1042, "status": "success"}
+cache.set("job_123_stats", pipeline_data)
+
+# 3. Retrieve it later (It comes back as a dictionary!)
+result = cache.get("job_123_stats")
+print(type(result)) # <class 'dict'>
+
+# 4. Clean up
+cache.delete("job_123_stats")
+```
 
 ---
 

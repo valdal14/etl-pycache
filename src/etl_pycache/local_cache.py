@@ -50,7 +50,32 @@ class LocalDiskCache(BaseCache):
         Returns:
             PayloadType | None: The cached data, or None if the file does not exist.
         """
-        pass
+        path = self._get_file_path(key)
+
+        if not path.exists():
+            return None
+
+        raw_data = path.read_bytes()
+
+        try:
+            # Attempt to decode as standard text
+            text_data = raw_data.decode("utf-8")
+            try:
+                # Attempt to parse as a JSON collection
+                parsed_json = json.loads(text_data)
+
+                if isinstance(parsed_json, (dict, list)):
+                    return parsed_json
+
+                # If it parsed a primitive, fall back to the string
+                return text_data
+
+            except json.JSONDecodeError:
+                # return a string
+                return text_data
+        except UnicodeDecodeError:
+            # returns raw binary data that cannot be read as text
+            return raw_data
 
     def delete(self, key: str) -> None:
         """
@@ -59,7 +84,9 @@ class LocalDiskCache(BaseCache):
         Args:
             key (str): The unique identifier for the cache entry to delete.
         """
-        pass
+        path = self._get_file_path(key)
+        if path.exists():
+            path.unlink()
 
     def get_local_cache_name(self) -> str:
         """
