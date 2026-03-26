@@ -1,3 +1,4 @@
+import json
 from hashlib import sha256
 from pathlib import Path
 
@@ -36,7 +37,8 @@ class LocalDiskCache(BaseCache):
             key (str): The unique identifier for the cache entry.
             payload (PayloadType): The data to serialize and save to disk.
         """
-        pass
+        path = self._get_file_path(key)
+        self._save_payload(path, payload)
 
     def get(self, key: str) -> PayloadType | None:
         """
@@ -90,3 +92,58 @@ class LocalDiskCache(BaseCache):
         """
         hashed_key = sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{hashed_key}.cache"
+
+    # NOTE: - Internal Helper Methods #################################################################
+
+    def _save_payload(self, path: Path, payload: PayloadType) -> None:
+        """
+        Routes the payload to the appropriate serialization and I/O method based on its type.
+
+        Args:
+            path (Path): The hashed file path where the data should be saved.
+            payload (PayloadType): The data to inspect and route.
+
+        Raises:
+            NotImplementedError: If the payload is an unsupported type or an Iterator.
+        """
+        if isinstance(payload, str):
+            self._save_str_payload(path, payload)
+        elif isinstance(payload, bytes):
+            self._save_bytes_payload(path, payload)
+        elif isinstance(payload, (list, dict)):
+            self._save_collection_payload(path, payload)
+        else:
+            raise NotImplementedError(
+                "This payload type or streaming Iterator is not yet supported."
+            )
+
+    def _save_str_payload(self, path: Path, payload: PayloadType) -> None:
+        """
+        Writes a standard Python string to disk using UTF-8 encoding.
+
+        Args:
+            path (Path): The target file path.
+            payload (str): The string data to write.
+        """
+        path.write_text(payload, encoding="utf-8")
+
+    def _save_bytes_payload(self, path: Path, payload: PayloadType) -> None:
+        """
+        Writes raw binary data directly to disk.
+
+        Args:
+            path (Path): The target file path.
+            payload (bytes): The binary data to write.
+        """
+        path.write_bytes(payload)
+
+    def _save_collection_payload(self, path: Path, payload: PayloadType) -> None:
+        """
+        Serializes a Python list or dictionary into a JSON string, then saves it.
+
+        Args:
+            path (Path): The target file path.
+            payload (list | dict): The collection to serialize.
+        """
+        str_collection = json.dumps(payload)
+        self._save_str_payload(path, str_collection)
