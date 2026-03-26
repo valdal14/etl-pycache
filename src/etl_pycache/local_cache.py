@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator as ABCIterator
 from hashlib import sha256
 from pathlib import Path
 
@@ -77,6 +78,33 @@ class LocalDiskCache(BaseCache):
             # returns raw binary data that cannot be read as text
             return raw_data
 
+    def get_stream(self, key: str, chunk_size: int = 65536) -> ABCIterator | None:
+        """
+        Retrieves a cached file as a memory-efficient byte stream.
+
+        Bypasses the heuristic deserialization engine to safely read massive
+        files (e.g., 10GB+) without causing Out-Of-Memory (OOM) crashes.
+
+        Args:
+            key (str): The unique identifier for the cache entry.
+            chunk_size (int, optional): The number of bytes to read per yield.
+                Defaults to 65536 (64KB).
+
+        Returns:
+            ABCIterator | None: A generator yielding raw bytes, or None if missing.
+        """
+        path = self._get_file_path(key)
+
+        if not path.exists():
+            return None
+
+        def _stream_generator() -> ABCIterator:
+            with path.open(mode="rb") as f:
+                while chunk := f.read(chunk_size):
+                    yield chunk
+
+        return _stream_generator()
+
     def delete(self, key: str) -> None:
         """
         Physically removes the specific cache file from the hard drive if it exists.
@@ -139,6 +167,8 @@ class LocalDiskCache(BaseCache):
             self._save_bytes_payload(path, payload)
         elif isinstance(payload, (list, dict)):
             self._save_collection_payload(path, payload)
+        elif isinstance(payload, ABCIterator):
+            self._save_stream_payload(path, payload)
         else:
             raise NotImplementedError(
                 "This payload type or streaming Iterator is not yet supported."
@@ -174,3 +204,8 @@ class LocalDiskCache(BaseCache):
         """
         str_collection = json.dumps(payload)
         self._save_str_payload(path, str_collection)
+
+    def _save_stream_payload(self, path: Path, payload: PayloadType) -> None:
+        with path.open(mode="wb") as f:
+            for chunk in payload:
+                f.write(chunk)

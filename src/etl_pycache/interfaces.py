@@ -32,6 +32,20 @@ class BaseCache(ABC):
         pass
 
     @abstractmethod
+    def get_stream(self, key: str, chunk_size: int = 65536) -> Iterator[bytes] | None:
+        """
+        Retrieves a cached file as a memory-efficient byte stream.
+
+        Args:
+            key (str): The unique identifier for the cache entry.
+            chunk_size (int, optional): The number of bytes to read per yield. Defaults to 64KB.
+
+        Returns:
+            Iterator[bytes] | None: A generator yielding raw bytes, or None if the key is missing.
+        """
+        pass
+
+    @abstractmethod
     def delete(self, key: str) -> None:
         """
         Removes the payload from the cache.
