@@ -1,4 +1,5 @@
 import tempfile
+from collections.abc import Iterator as ABCIterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -102,12 +103,13 @@ def test_set_saves_byte_stream_payload(setup_local_cache):
     # generator expression
     mock_stream_payload = (b"chunk_" + str(i).encode("utf-8") for i in range(3))
     sut = make_sut(setup_local_cache, "stream_key", mock_stream_payload)
-    
+
     sut.cache.set("stream_key", mock_stream_payload)
     res = sut.cache.get("stream_key")
-    
+
     # The heuristic engine will decode valid UTF-8 bytes into a string on retrieval!
     assert res == "chunk_0chunk_1chunk_2"
+
 
 # NOTE: - Get method tests ########################################################################
 
@@ -162,6 +164,21 @@ def test_get_returns_dic(setup_local_cache):
 
     assert isinstance(res, dict)
     assert res == sut.payload
+
+
+def test_get_stream_returns_iterator_and_reads_chunks(setup_local_cache):
+    # Save a stream to the disk
+    mock_stream_payload = (b"chunk_" + str(i).encode("utf-8") for i in range(3))
+    sut = make_sut(setup_local_cache, "stream_key", mock_stream_payload)
+    sut.cache.set(sut.key, mock_stream_payload)
+
+    # Use a chunk size of 7 bytes to force it to yield multiple times
+    res_iterator = sut.cache.get_stream(sut.key, chunk_size=7)
+
+    assert isinstance(res_iterator, ABCIterator)
+    # Reconstruct the string by joining the yielded byte chunks
+    reconstructed_bytes = b"".join(res_iterator)
+    assert reconstructed_bytes == b"chunk_0chunk_1chunk_2"
 
 
 # NOTE: - Delete method tests #####################################################################

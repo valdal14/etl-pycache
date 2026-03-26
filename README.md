@@ -21,7 +21,7 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 ## 🚦 Roadmap
 
 - [x] Define abstract base interface and project scaffolding.
-- [ ] Implement local disk caching logic with string serialization.
+- [x] Implement local disk caching logic with string serialization.
 - [ ] Implement LRU (Least Recently Used) eviction policies.
 - [ ] Add concurrency control (file locking) for parallel workers.
 - [ ] Implement compression for large text/XML payloads.
@@ -67,6 +67,59 @@ print(type(result)) # <class 'dict'>
 
 # 4. Clean up
 cache.delete("job_123_stats")
+```
+
+### 🌊 Memory-Safe Streaming (10GB+ Datasets)
+For massive datasets, `LocalDiskCache` supports chunked binary streaming to completely prevent Out-Of-Memory (OOM) crashes. Our `set` method natively accepts any Python `Iterator[bytes]`.
+
+Here are the two most common ways to use it in production pipelines (like Airflow or Prefect):
+
+#### Scenario A: Streaming from an API to the Cache
+When downloading massive files from the web, do not load them into memory. Pass the HTTP library's built-in iterator directly to the cache.
+
+```python
+import requests
+from etl_pycache.local_cache import LocalDiskCache
+
+cache = LocalDiskCache()
+
+# 1. Connect to the massive dataset and tell requests to stream it
+response = requests.get("https://api.example.com/massive_dataset.csv", stream=True)
+
+# 2. Hand the API's built-in iterator directly to your cache
+cache.set("downloaded_dataset", response.iter_content(chunk_size=65536))
+```
+
+#### Scenario B: Streaming a Local File to the Cache
+If you are moving or backing up massive local files (e.g., inside an Airflow DAG), use a simple Python generator to yield the file in chunks.
+
+```python
+from etl_pycache.local_cache import LocalDiskCache
+
+cache = LocalDiskCache()
+
+def read_in_chunks(file_path: str, chunk_size: int = 65536):
+    """Safely yields a local file in memory-efficient chunks."""
+    with open(file_path, "rb") as f:
+        while chunk := f.read(chunk_size):
+            yield chunk
+
+# Pass the generator execution directly into the cache
+cache.set("local_backup", read_in_chunks("/path/to/massive_local_file.csv"))
+```
+
+#### Retrieving a Stream
+When you need to read a massive file back out of the cache, explicitly use get_stream() to bypass standard memory loading:
+
+```python
+# Returns a memory-safe generator
+stream = cache.get_stream("downloaded_dataset", chunk_size=65536)
+
+for chunk in stream:
+    # TODO: This is where your custom pipeline logic goes!
+    # For example: parsing the bytes, writing to a database, etc.
+    # Here is a simple example just printing the size of each chunk:
+    print(f"Successfully processed a chunk of {len(chunk)} bytes")
 ```
 
 ---
