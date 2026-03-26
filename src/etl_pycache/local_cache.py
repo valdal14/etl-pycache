@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator as ABCIterator
 from hashlib import sha256
 from pathlib import Path
 
@@ -139,6 +140,8 @@ class LocalDiskCache(BaseCache):
             self._save_bytes_payload(path, payload)
         elif isinstance(payload, (list, dict)):
             self._save_collection_payload(path, payload)
+        elif isinstance(payload, ABCIterator):
+            self._save_stream_payload(path, payload)
         else:
             raise NotImplementedError(
                 "This payload type or streaming Iterator is not yet supported."
@@ -174,3 +177,8 @@ class LocalDiskCache(BaseCache):
         """
         str_collection = json.dumps(payload)
         self._save_str_payload(path, str_collection)
+
+    def _save_stream_payload(self, path: Path, payload: PayloadType) -> None:
+        with path.open(mode="wb") as f:
+            for chunk in payload:
+                f.write(chunk)

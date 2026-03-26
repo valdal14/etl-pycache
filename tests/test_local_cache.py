@@ -98,6 +98,17 @@ def test_set_throws_NotImplementedError(setup_local_cache):
         sut.cache.set(sut.key, payload)
 
 
+def test_set_saves_byte_stream_payload(setup_local_cache):
+    # generator expression
+    mock_stream_payload = (b"chunk_" + str(i).encode("utf-8") for i in range(3))
+    sut = make_sut(setup_local_cache, "stream_key", mock_stream_payload)
+    
+    sut.cache.set("stream_key", mock_stream_payload)
+    res = sut.cache.get("stream_key")
+    
+    # The heuristic engine will decode valid UTF-8 bytes into a string on retrieval!
+    assert res == "chunk_0chunk_1chunk_2"
+
 # NOTE: - Get method tests ########################################################################
 
 
