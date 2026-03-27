@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import Iterator as ABCIterator
 from hashlib import sha256
 from pathlib import Path
@@ -30,16 +31,19 @@ class LocalDiskCache(BaseCache):
         self.cache_dir = Path(cache_dir)
         self._make_path(self.cache_dir)
 
-    def set(self, key: str, payload: PayloadType) -> None:
+    def set(self, key: str, payload: PayloadType, ttl_seconds: int | None = None) -> None:
         """
         Serializes the polymorphic payload and writes it to a securely hashed file.
 
         Args:
             key (str): The unique identifier for the cache entry.
             payload (PayloadType): The data to serialize and save to disk.
+            ttl_seconds (int | None, optional): The Time-To-Live in seconds.
+                If provided, the cache entry will expire and be deleted after this time.
         """
         path = self._get_file_path(key)
         self._save_payload(path, payload)
+        self._save_meta_file(path, ttl_seconds)
 
     def get(self, key: str) -> PayloadType | None:
         """
@@ -53,7 +57,13 @@ class LocalDiskCache(BaseCache):
         """
         path = self._get_file_path(key)
 
+        # check if the cache exists
         if not path.exists():
+            return None
+
+        # check if the meta file exists
+        if self._is_expired(path):
+            self.delete(key)
             return None
 
         raw_data = path.read_bytes()
@@ -95,7 +105,13 @@ class LocalDiskCache(BaseCache):
         """
         path = self._get_file_path(key)
 
+        # check if the cache exists
         if not path.exists():
+            return None
+
+        # check if the meta file exists
+        if self._is_expired(path):
+            self.delete(key)
             return None
 
         def _stream_generator() -> ABCIterator:
@@ -107,14 +123,19 @@ class LocalDiskCache(BaseCache):
 
     def delete(self, key: str) -> None:
         """
-        Physically removes the specific cache file from the hard drive if it exists.
+        Physically removes the specific cache file and its TTL sidecar from the hard drive.
 
         Args:
             key (str): The unique identifier for the cache entry to delete.
         """
         path = self._get_file_path(key)
+        meta_path = path.with_suffix(".meta")
+
         if path.exists():
             path.unlink()
+
+        if meta_path.exists():
+            meta_path.unlink()
 
     def get_local_cache_name(self) -> str:
         """
@@ -206,6 +227,73 @@ class LocalDiskCache(BaseCache):
         self._save_str_payload(path, str_collection)
 
     def _save_stream_payload(self, path: Path, payload: PayloadType) -> None:
+        """
+        Streams an iterator of bytes directly to the disk in chunks.
+
+        This method uses unbuffered binary writing to prevent Out-Of-Memory (OOM)
+        errors when caching massive datasets (e.g., 10GB+ files).
+
+        Args:
+            path (Path): The hashed target file path where the stream will be written.
+            payload (PayloadType): A generator or iterator yielding raw bytes.
+        """
         with path.open(mode="wb") as f:
             for chunk in payload:
                 f.write(chunk)
+
+    def _save_meta_file(self, path: Path, ttl_seconds: int | None) -> None:
+        """
+        Manages the TTL sidecar file for a given cache entry.
+
+        If a TTL is provided, it calculates the expiration and saves a .meta JSON file.
+        If no TTL is provided, it ensures any pre-existing .meta file is deleted so
+        the new cache entry doesn't accidentally inherit an old expiration.
+
+        Args:
+            path (Path): The physical Path object of the base .cache file.
+            ttl_seconds (int | None): The time-to-live in seconds, or None for infinite.
+        """
+        meta_path = path.with_suffix(".meta")
+
+        if ttl_seconds is not None:
+            expiration_timestamp = time.time() + ttl_seconds
+            meta_data = self._gen_meta_object(expiration_timestamp, ttl_seconds)
+            meta_path.write_text(json.dumps(meta_data), encoding="utf-8")
+        else:
+            # Edge Case: Clean up the old sidecar if the new payload has no TTL
+            if meta_path.exists():
+                meta_path.unlink()
+
+    def _gen_meta_object(self, expiration_timestamp: float, ttl_seconds: int) -> dict:
+        """
+        Constructs the dictionary payload for the TTL sidecar file.
+
+        Args:
+            expiration_timestamp (float): The exact Unix timestamp when the file expires.
+            ttl_seconds (int): The original TTL duration provided by the user.
+
+        Returns:
+            dict: The standardized schema for the .meta JSON file.
+        """
+        return {"expires_at": expiration_timestamp, "ttl_seconds": ttl_seconds}
+
+    def _is_expired(self, path: Path) -> bool:
+        """
+        Reads the .meta sidecar file to determine if the cache entry has expired.
+
+        Args:
+            path (Path): The physical Path object of the base .cache file.
+
+        Returns:
+            bool: True if the file has expired, False if it is still valid or has no TTL.
+        """
+        meta_path = path.with_suffix(".meta")
+
+        if not meta_path.exists():
+            # If there is no sidecar file, it means this entry has no TTL and lives forever.
+            return False
+
+        # Read the sidecar file and compare the timestamp to the current clock
+        meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+
+        return time.time() >= meta_data["expires_at"]

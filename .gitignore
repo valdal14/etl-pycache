@@ -212,4 +212,5 @@ htmlcov/
 coverage.xml
 
 # Local testing files
-playground.py
+*playground*.py
+*.csv
