@@ -1,4 +1,6 @@
+import json
 import tempfile
+import time
 from collections.abc import Iterator as ABCIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -205,6 +207,117 @@ def test_delete_successfully_delete_cached_file(setup_local_cache):
     # Prove it is no longer available by trying to get it again
     deleted_res = sut.cache.get(sut.key)
     assert deleted_res is None
+
+
+# NOTE: - TTL method tests ########################################################################
+
+
+def test_set_creates_meta_file_for_ttl(setup_local_cache):
+    # Initialize the cache and call set with the new ttl_seconds argument
+    sut = make_sut(setup_local_cache)
+    sut.cache.set(sut.key, sut.payload, ttl_seconds=60)
+
+    # Construct the expected path for the sidecar file
+    # Use pathlib's .with_suffix() to easily swap '.cache' to '.meta'
+    cache_file_path = sut.cache._get_file_path(sut.key)
+    meta_file_path = cache_file_path.with_suffix(".meta")
+
+    # Assert the file physically exists on the OS
+    assert meta_file_path.exists()
+
+    # Read the raw JSON from the hard drive and assert the data is correct
+    meta_data = json.loads(meta_file_path.read_text())
+    assert "expires_at" in meta_data
+
+    # Assert the expiration timestamp is approximately 60 seconds from now
+    expected_expiration = time.time() + 60
+    # 2-second margin of error for slow CI runners
+    assert abs(meta_data["expires_at"] - expected_expiration) < 2
+
+
+def test_get_returns_paypal_if_ttl_not_expired(setup_local_cache):
+    sut = make_sut(setup_local_cache)
+
+    sut.cache.set(sut.key, sut.payload, ttl_seconds=60)
+    res = sut.cache.get(sut.key)
+
+    assert isinstance(res, dict)
+    assert res == sut.payload
+
+
+def test_get_stream_returns_payload_if_ttl_not_expired(setup_local_cache):
+    mock_stream = (b"chunk_" + str(i).encode("utf-8") for i in range(3))
+    sut = make_sut(setup_local_cache, "stream_ttl_key", mock_stream)
+
+    # Set with a valid TTL
+    sut.cache.set(sut.key, mock_stream, ttl_seconds=60)
+    res_iterator = sut.cache.get_stream(sut.key)
+
+    assert isinstance(res_iterator, ABCIterator)
+    assert b"".join(res_iterator) == b"chunk_0chunk_1chunk_2"
+
+
+def test_get_deletes_cache_and_meta_if_ttl_expired(setup_local_cache):
+    sut = make_sut(setup_local_cache)
+
+    # Set with a negative TTL so it expires instantly in the past
+    sut.cache.set(sut.key, sut.payload, ttl_seconds=-1)
+
+    # Attempting to get it should trigger the interceptor
+    res = sut.cache.get(sut.key)
+
+    assert res is None
+
+    # Prove the files were physically wiped from the OS
+    cache_file_path = sut.cache._get_file_path(sut.key)
+    assert not cache_file_path.exists()
+    assert not cache_file_path.with_suffix(".meta").exists()
+
+
+def test_get_stream_deletes_cache_and_meta_if_ttl_expired(setup_local_cache):
+    mock_stream = (b"chunk_" + str(i).encode("utf-8") for i in range(3))
+    sut = make_sut(setup_local_cache, "stream_expired_key", mock_stream)
+
+    # Set with a negative TTL
+    sut.cache.set(sut.key, mock_stream, ttl_seconds=-1)
+
+    # Attempting to stream it should trigger the interceptor
+    res = sut.cache.get_stream(sut.key)
+
+    assert res is None
+
+    # Prove the files were physically wiped
+    cache_file_path = sut.cache._get_file_path(sut.key)
+    assert not cache_file_path.exists()
+    assert not cache_file_path.with_suffix(".meta").exists()
+
+
+def test_delete_removes_both_cache_and_meta_files(setup_local_cache):
+    sut = make_sut(setup_local_cache)
+    sut.cache.set(sut.key, sut.payload, ttl_seconds=60)
+
+    # Execute explicit delete
+    sut.cache.delete(sut.key)
+
+    # Prove both files are gone
+    cache_file_path = sut.cache._get_file_path(sut.key)
+    assert not cache_file_path.exists()
+    assert not cache_file_path.with_suffix(".meta").exists()
+
+
+def test_set_without_ttl_removes_existing_meta_file(setup_local_cache):
+    sut = make_sut(setup_local_cache)
+
+    sut.cache.set(sut.key, sut.payload, ttl_seconds=60)
+    cache_file_path = sut.cache._get_file_path(sut.key)
+    assert cache_file_path.with_suffix(".meta").exists()
+
+    # Overwrite the exact same key WITHOUT a TTL
+    sut.cache.set(sut.key, "new_infinite_payload")
+
+    # Prove the old .meta file was successfully cleaned up
+    assert cache_file_path.exists()
+    assert not cache_file_path.with_suffix(".meta").exists()
 
 
 # NOTE: - Test's Helpers ##########################################################################

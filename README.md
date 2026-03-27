@@ -21,8 +21,9 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 ## 🚦 Roadmap
 
 - [x] Define abstract base interface and project scaffolding.
-- [x] Implement local disk caching logic with string serialization.
-- [ ] Implement LRU (Least Recently Used) eviction policies.
+- [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
+- [x] Implement TTL (Time-To-Live) expiration policies.
+- [ ] Implement LRU (Least Recently Used) capacity eviction.
 - [ ] Add concurrency control (file locking) for parallel workers.
 - [ ] Implement compression for large text/XML payloads.
 
@@ -120,6 +121,29 @@ for chunk in stream:
     # For example: parsing the bytes, writing to a database, etc.
     # Here is a simple example just printing the size of each chunk:
     print(f"Successfully processed a chunk of {len(chunk)} bytes")
+```
+
+---
+
+### ⏳ Time-To-Live (TTL) Expiration
+You can enforce automatic expiration on any cached payload by passing `ttl_seconds` to the `set` method. 
+
+Under the hood, `etl-pycache` uses a **Sidecar Pattern**. When a TTL is provided, it safely writes a tiny `[key].meta` JSON file next to your `[key].cache` data file. When the data is requested, the engine checks the clock. If the TTL has passed, it automatically wipes both files from the OS and returns `None`.
+
+```python
+from etl_pycache.local_cache import LocalDiskCache
+
+cache = LocalDiskCache()
+
+# 1. Cache a payload for exactly 1 hour (3600 seconds)
+cache.set("daily_report", {"status": "success"}, ttl_seconds=3600)
+
+# 2. Retrieve the payload (Returns the dictionary if within 1 hour)
+result = cache.get("daily_report")
+
+# 3. If accessed after 1 hour, it returns None and cleans up the hard drive
+expired_result = cache.get("daily_report") 
+# Returns: None
 ```
 
 ---
