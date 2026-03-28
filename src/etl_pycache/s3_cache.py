@@ -1,20 +1,24 @@
 import json
 import time
-import boto3
-from typing import Any
-from botocore.exceptions import ClientError
 from collections.abc import Iterator as ABCIterator
+from typing import Any
+
+import boto3
+from botocore.exceptions import ClientError
+
 from etl_pycache.interfaces import BaseCache, PayloadType
+
 
 class _IteratorReader:
     """
     An adapter that wraps a Python Iterator[bytes] and provides a .read() method.
     This tricks boto3 into thinking our generator is a physical file it can stream.
     """
+
     def __init__(self, iterator: ABCIterator):
         """
         Initializes the adapter with the underlying byte generator.
-        
+
         Args:
             iterator (ABCIterator): The generator yielding chunks of bytes.
         """
@@ -24,10 +28,10 @@ class _IteratorReader:
     def read(self, size: int = -1) -> bytes:
         """
         Reads a specific number of bytes from the underlying iterator.
-        
+
         Args:
             size (int, optional): The number of bytes to read. Defaults to -1 (read all).
-            
+
         Returns:
             bytes: The extracted chunk of bytes.
         """
@@ -37,7 +41,7 @@ class _IteratorReader:
                 self._buffer.extend(next(self._iterator))
         except StopIteration:
             # The generator is empty, proceed to return whatever is left
-            pass 
+            pass
 
         if size == -1:
             # If boto3 asks for everything at once (fallback)
@@ -47,20 +51,20 @@ class _IteratorReader:
             # Return exactly the chunk size boto3 requested
             result = bytes(self._buffer[:size])
             del self._buffer[:size]
-            
+
         return result
 
 
 class S3Cache(BaseCache):
     """
-    An AWS S3 backend for the caching engine. 
+    An AWS S3 backend for the caching engine.
     Supports polymorphic payloads, massive streaming, and TTL expiration via S3 Metadata.
     """
 
     def __init__(self, bucket_name: str, client: Any = None):
         """
         Initializes the S3 Cache instance.
-        
+
         Args:
             bucket_name (str): The name of the target AWS S3 bucket.
             client (Any, optional): An injected boto3 S3 client. If None, creates a default client.
@@ -71,7 +75,7 @@ class S3Cache(BaseCache):
     def set(self, key: str, payload: PayloadType, ttl_seconds: int | None = None) -> None:
         """
         Orchestrates the serialization and upload of polymorphic payloads to S3.
-        
+
         Args:
             key (str): The unique identifier for the cache entry.
             payload (PayloadType): The string, dict, bytes, or stream to upload.
@@ -88,12 +92,12 @@ class S3Cache(BaseCache):
         """
         Retrieves the object from S3, enforcing TTL expiration.
         Deserializes JSON or Strings automatically.
-        
+
         Args:
             key (str): The unique identifier for the cache entry.
-            
+
         Returns:
-            Any | None: The parsed dictionary, raw string/XML, raw bytes, 
+            Any | None: The parsed dictionary, raw string/XML, raw bytes,
                         or None if the object doesn't exist or is expired.
         """
         try:
@@ -104,7 +108,7 @@ class S3Cache(BaseCache):
             if error_code in ["NoSuchKey", "404"]:
                 return None
             # Reraise if it's an actual permissions or network issue
-            raise e 
+            raise e
 
         # Enforce TTL Expiration
         metadata = response.get("Metadata", {})
@@ -131,12 +135,12 @@ class S3Cache(BaseCache):
     def get_stream(self, key: str) -> ABCIterator | None:
         """
         Retrieves a streaming connection to the S3 object, enforcing TTL expiration.
-        
+
         Args:
             key (str): The unique identifier for the cache entry.
-            
+
         Returns:
-            ABCIterator | None: The boto3 StreamingBody natively yielding bytes, 
+            ABCIterator | None: The boto3 StreamingBody natively yielding bytes,
                                 or None if missing/expired.
         """
         try:
@@ -159,7 +163,7 @@ class S3Cache(BaseCache):
     def delete(self, key: str) -> None:
         """
         Deletes the object from the S3 bucket.
-        
+
         Args:
             key (str): The unique identifier for the cache entry to delete.
         """
@@ -170,16 +174,16 @@ class S3Cache(BaseCache):
     def _prepare_metadata(self, ttl_seconds: int | None) -> dict:
         """
         Calculates the expiration timestamp and formats it for S3.
-        
+
         Args:
             ttl_seconds (int | None): The user-provided TTL duration.
-            
+
         Returns:
             dict: The metadata dictionary formatted with string values for AWS.
         """
         if ttl_seconds is None:
             return {}
-            
+
         expiration_timestamp = time.time() + ttl_seconds
         # S3 Metadata MUST be strings!
         return {"expires_at": str(expiration_timestamp)}
@@ -187,7 +191,7 @@ class S3Cache(BaseCache):
     def _upload_stream(self, key: str, payload: ABCIterator, metadata: dict) -> None:
         """
         Wraps an iterator in a file-like adapter and streams it directly to S3.
-        
+
         Args:
             key (str): The destination object key.
             payload (ABCIterator): The raw byte generator.
@@ -195,19 +199,19 @@ class S3Cache(BaseCache):
         """
         # Wrap our generator in the adapter
         file_adapter = _IteratorReader(payload)
-        
+
         # upload_fileobj streams the data in 8MB chunks automatically
         self.client.upload_fileobj(
             Fileobj=file_adapter,
             Bucket=self.bucket_name,
             Key=key,
-            ExtraArgs={"Metadata": metadata} if metadata else None
+            ExtraArgs={"Metadata": metadata} if metadata else None,
         )
 
     def _upload_in_memory(self, key: str, payload: PayloadType, metadata: dict) -> None:
         """
         Serializes and uploads static payloads (dicts, lists, strings, bytes).
-        
+
         Args:
             key (str): The destination object key.
             payload (PayloadType): The static data to cache.
@@ -216,33 +220,28 @@ class S3Cache(BaseCache):
         # Convert dicts and lists to JSON strings
         if isinstance(payload, (dict, list)):
             payload = json.dumps(payload)
-            
+
         # Convert strings to raw bytes
         if isinstance(payload, str):
             payload = payload.encode("utf-8")
-            
+
         # Upload directly using put_object
-        self.client.put_object(
-            Bucket=self.bucket_name,
-            Key=key,
-            Body=payload,
-            Metadata=metadata
-        )
-     
+        self.client.put_object(Bucket=self.bucket_name, Key=key, Body=payload, Metadata=metadata)
+
     def _is_expired(self, metadata: dict) -> bool:
         """
         Helper method to check if the S3 Object's metadata indicates it has expired.
-        
+
         Args:
             metadata (dict): The parsed Metadata dictionary returned by boto3.
-            
+
         Returns:
             bool: True if the current time has surpassed the expires_at timestamp.
         """
         # AWS automatically lowercases metadata keys
         expires_at_str = metadata.get("expires_at")
-        
+
         if not expires_at_str:
             return False
-            
+
         return time.time() >= float(expires_at_str)

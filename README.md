@@ -150,6 +150,47 @@ expired_result = cache.get("daily_report")
 
 ---
 
+## 💾 Usage: S3Cache (AWS S3 Cloud Backend)
+
+The `S3Cache` engine implements the exact same `BaseCache` interface but securely streams your data directly into an AWS S3 bucket. 
+
+**Installation:**
+To keep the core library lightweight, the AWS SDK (`boto3`) is an optional dependency. You must install the package with the `s3` extra to use this backend:
+
+```bash
+# Using pip
+pip install "etl-pycache[s3]"
+
+# Using poetry
+poetry add etl-pycache --extras s3
+```
+
+You can let `boto3` automatically discover your AWS environment variables, or explicitly inject your own authenticated client. The engine natively supports memory-safe streaming (`upload_fileobj`) and TTL expiration via S3 Object Metadata, meaning no cleanup scripts or sidecar files are required.
+
+```python
+import boto3
+from etl_pycache.s3_cache import S3Cache
+
+# 1. Initialize with an explicitly authenticated client
+s3_client = boto3.client(
+    "s3", 
+    aws_access_key_id="YOUR_ACCESS_KEY",
+    aws_secret_access_key="YOUR_SECRET_KEY",
+    region_name="eu-west-1"
+)
+cache = S3Cache(bucket_name="my-production-bucket", client=s3_client)
+
+# 2. Stream a massive payload to S3 with a 1-hour TTL
+# The engine pipes the generator directly to the cloud without bloating your RAM
+cache.set("my_folder/financial_data", my_byte_generator, ttl_seconds=3600)
+
+# 3. Retrieve the stream directly from the cloud
+# Returns a boto3 StreamingBody that flawlessly implements the Python Iterator protocol
+stream = cache.get_stream("my_folder/financial_data")
+```
+
+---
+
 ## 🤝 Contributing to etl-pycache
 
 We welcome contributions! To maintain enterprise-grade code quality, this project uses strict formatting, linting, and testing pipelines.
