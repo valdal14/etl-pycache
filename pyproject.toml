@@ -9,6 +9,7 @@ license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "boto3 (>=1.42.78,<2.0.0)"
 ]
 
 
@@ -20,7 +21,8 @@ build-backend = "poetry.core.masonry.api"
 dev = [
     "pytest (>=9.0.2,<10.0.0)",
     "pytest-cov (>=7.1.0,<8.0.0)",
-    "ruff (>=0.15.7,<0.16.0)"
+    "ruff (>=0.15.7,<0.16.0)",
+    "moto (>=5.1.22,<6.0.0)"
 ]
 
 [tool.ruff]

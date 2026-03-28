@@ -18,14 +18,16 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 * **Developer Velocity:** Rapidly debug downstream load operations without waiting for upstream transformations to finish.
 * **Polymorphic By Design:** Natively supports strings, bytes, dictionaries, lists, and byte streams without requiring manual serialization before caching.
 
-## 🚦 Roadmap
+## 🚦 Roadmap (Towards V1.0.0)
 
 - [x] Define abstract base interface and project scaffolding.
 - [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
 - [x] Implement TTL (Time-To-Live) expiration policies.
+- [x] Implement AWS S3 cloud cache backend.
 - [ ] Implement LRU (Least Recently Used) capacity eviction.
 - [ ] Add concurrency control (file locking) for parallel workers.
 - [ ] Implement compression for large text/XML payloads.
+- [ ] Build official documentation site using MkDocs.
 
 ---
 
