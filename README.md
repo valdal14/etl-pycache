@@ -18,14 +18,16 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 * **Developer Velocity:** Rapidly debug downstream load operations without waiting for upstream transformations to finish.
 * **Polymorphic By Design:** Natively supports strings, bytes, dictionaries, lists, and byte streams without requiring manual serialization before caching.
 
-## 🚦 Roadmap
+## 🚦 Roadmap (Towards V1.0.0)
 
 - [x] Define abstract base interface and project scaffolding.
 - [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
 - [x] Implement TTL (Time-To-Live) expiration policies.
+- [x] Implement AWS S3 cloud cache backend.
 - [ ] Implement LRU (Least Recently Used) capacity eviction.
 - [ ] Add concurrency control (file locking) for parallel workers.
 - [ ] Implement compression for large text/XML payloads.
+- [ ] Build official documentation site using MkDocs.
 
 ---
 
@@ -144,6 +146,47 @@ result = cache.get("daily_report")
 # 3. If accessed after 1 hour, it returns None and cleans up the hard drive
 expired_result = cache.get("daily_report") 
 # Returns: None
+```
+
+---
+
+## 💾 Usage: S3Cache (AWS S3 Cloud Backend)
+
+The `S3Cache` engine implements the exact same `BaseCache` interface but securely streams your data directly into an AWS S3 bucket. 
+
+**Installation:**
+To keep the core library lightweight, the AWS SDK (`boto3`) is an optional dependency. You must install the package with the `s3` extra to use this backend:
+
+```bash
+# Using pip
+pip install "etl-pycache[s3]"
+
+# Using poetry
+poetry add etl-pycache --extras s3
+```
+
+You can let `boto3` automatically discover your AWS environment variables, or explicitly inject your own authenticated client. The engine natively supports memory-safe streaming (`upload_fileobj`) and TTL expiration via S3 Object Metadata, meaning no cleanup scripts or sidecar files are required.
+
+```python
+import boto3
+from etl_pycache.s3_cache import S3Cache
+
+# 1. Initialize with an explicitly authenticated client
+s3_client = boto3.client(
+    "s3", 
+    aws_access_key_id="YOUR_ACCESS_KEY",
+    aws_secret_access_key="YOUR_SECRET_KEY",
+    region_name="eu-west-1"
+)
+cache = S3Cache(bucket_name="my-production-bucket", client=s3_client)
+
+# 2. Stream a massive payload to S3 with a 1-hour TTL
+# The engine pipes the generator directly to the cloud without bloating your RAM
+cache.set("my_folder/financial_data", my_byte_generator, ttl_seconds=3600)
+
+# 3. Retrieve the stream directly from the cloud
+# Returns a boto3 StreamingBody that flawlessly implements the Python Iterator protocol
+stream = cache.get_stream("my_folder/financial_data")
 ```
 
 ---
