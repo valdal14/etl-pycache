@@ -22,7 +22,7 @@ def test_capacity_eviction_protects_disk(tmp_path):
     cache_files = list(tmp_path.glob("*.cache"))
     assert len(cache_files) == 3, f"Expected 3 files, but found {len(cache_files)}!"
 
-    # 4. Verify exactly WHICH files survived (The Oldest-First rule)
+    # Verify exactly WHICH files survived (The Oldest-First rule)
     # The first two should be physically gone
     assert cache.get("key_1") is None, "key_1 should have been evicted!"
     assert cache.get("key_2") is None, "key_2 should have been evicted!"
