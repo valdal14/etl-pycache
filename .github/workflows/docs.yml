@@ -1,0 +1,36 @@
+name: Publish Documentation
+
+on:
+  push:
+    branches: [ "main" ]
+    # Only run this if the documentation actually changed!
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'etl_pycache/**' # Triggers if docstrings in the code change
+
+permissions:
+  contents: write # Required for MkDocs to push to the gh-pages branch
+
+jobs:
+  deploy-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: 'poetry'
+
+      - name: Install dependencies
+        # This installs the dev group so mkdocs-material is available
+        run: poetry install
+
+      - name: Deploy to GitHub Pages
+        # This automatically builds the site and pushes it to a special gh-pages branch
+        run: poetry run mkdocs gh-deploy --force

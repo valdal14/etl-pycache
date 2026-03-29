@@ -1,0 +1,50 @@
+site_name: etl-pycache
+site_description: Enterprise-grade, persistent disk and S3 caching for data pipelines.
+site_author: valdal14
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: true
+            
+nav:
+  - Home: index.md
+  - Engines:
+    - Local Disk Cache: engines/local_disk.md
+    - AWS S3 Cache: engines/s3_cloud.md
+  - Advanced:
+    - Concurrency & Locks: advanced/concurrency.md
+    - Compression: advanced/compression.md
+    - LRU Eviction: advanced/eviction.md

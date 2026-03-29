@@ -1,6 +1,6 @@
 [project]
 name = "etl-pycache"
-version = "0.1.0"
+version = "1.0.0"
 description = "A robust, persistent, disk-backed LRU cache designed specifically for Data Engineering (ETL) pipelines"
 authors = [
     {name = "Valerio DAlessio",email = "valdal14@gmail.com"}
@@ -22,7 +22,9 @@ dev = [
     "pytest (>=9.0.2,<10.0.0)",
     "pytest-cov (>=7.1.0,<8.0.0)",
     "ruff (>=0.15.7,<0.16.0)",
-    "moto (>=5.1.22,<6.0.0)"
+    "moto (>=5.1.22,<6.0.0)",
+    "mkdocs-material (>=9.7.6,<10.0.0)",
+    "mkdocstrings[python] (>=1.0.3,<2.0.0)"
 ]
 
 [tool.ruff]
