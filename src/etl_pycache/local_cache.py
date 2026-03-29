@@ -1,3 +1,4 @@
+import gzip
 import json
 import time
 from collections.abc import Iterator as ABCIterator
@@ -23,16 +24,14 @@ class LocalDiskCache(BaseCache):
 
         Args:
             cache_dir (str, optional): The directory path where the physical cache
-                files will be stored. Defaults to ".cache", which creates a hidden
-                folder in the current working directory. For ephemeral environments
-                (like Docker containers), this should be set to an absolute path
-                pointing to a persistent mounted volume (e.g., "/mnt/shared_cache")
-                to prevent data loss upon container restart.
+                files will be stored. Defaults to ".cache".
         """
         self.cache_dir = Path(cache_dir)
         self._make_path(self.cache_dir)
 
-    def set(self, key: str, payload: PayloadType, ttl_seconds: int | None = None) -> None:
+    def set(
+        self, key: str, payload: PayloadType, ttl_seconds: int | None = None, compress: bool = False
+    ) -> None:
         """
         Serializes the polymorphic payload and writes it to a securely hashed file.
 
@@ -40,19 +39,20 @@ class LocalDiskCache(BaseCache):
             key (str): The unique identifier for the cache entry.
             payload (PayloadType): The data to serialize and save to disk.
             ttl_seconds (int | None, optional): The Time-To-Live in seconds.
-                If provided, the cache entry will expire and be deleted after this time.
+            compress (bool, optional): If True, aggressively compresses strings, dicts,
+                lists, and bytes using gzip to save disk space. Defaults to False.
         """
         path = self._get_file_path(key)
         lock_path = str(path.with_suffix(".lock"))
 
         # Lock the entire transaction (Payload + Meta file)
         with CacheLock(lock_path):
-            self._save_payload(path, payload)
-            self._save_meta_file(path, ttl_seconds)
+            self._save_payload(path, payload, compress)
+            self._save_meta_file(path, ttl_seconds, compress)
 
     def get(self, key: str) -> PayloadType | None:
         """
-        Reads the cached file from the local disk and returns the deserialized payload.
+        Reads the cached file from the local disk, handling decompression and deserialization.
 
         Args:
             key (str): The unique identifier for the cache entry.
@@ -68,13 +68,22 @@ class LocalDiskCache(BaseCache):
                 return None
 
             if self._is_expired(path):
-                # Use the unlocked helper to prevent a Deadlock!
                 self._delete_files(path)
                 return None
 
             raw_data = path.read_bytes()
 
-        # NOTE: Deserialization happens OUTSIDE the lock to free up the file faster
+            # Check the .meta file for the compression flag
+            is_compressed = False
+            meta_path = path.with_suffix(".meta")
+            if meta_path.exists():
+                meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+                is_compressed = meta_data.get("compressed", False)
+
+        # Decompression and Deserialization happen OUTSIDE the lock to free up the file
+        if is_compressed:
+            raw_data = gzip.decompress(raw_data)
+
         try:
             text_data = raw_data.decode("utf-8")
             try:
@@ -90,22 +99,11 @@ class LocalDiskCache(BaseCache):
     def get_stream(self, key: str, chunk_size: int = 65536) -> ABCIterator | None:
         """
         Retrieves a cached file as a memory-efficient byte stream.
-
-        Bypasses the heuristic deserialization engine to safely read massive
-        files (e.g., 10GB+) without causing Out-Of-Memory (OOM) crashes.
-
-        Args:
-            key (str): The unique identifier for the cache entry.
-            chunk_size (int, optional): The number of bytes to read per yield.
-                Defaults to 65536 (64KB).
-
-        Returns:
-            ABCIterator | None: A generator yielding raw bytes, or None if missing.
+        Note: Compressed files are returned as compressed byte chunks.
         """
         path = self._get_file_path(key)
         lock_path = str(path.with_suffix(".lock"))
 
-        # Check existence and expiration safely
         with CacheLock(lock_path):
             if not path.exists():
                 return None
@@ -114,7 +112,6 @@ class LocalDiskCache(BaseCache):
                 self._delete_files(path)
                 return None
 
-        # Lock the file continuously while yielding chunks
         def _stream_generator() -> ABCIterator:
             with CacheLock(lock_path):
                 with path.open(mode="rb") as f:
@@ -124,12 +121,7 @@ class LocalDiskCache(BaseCache):
         return _stream_generator()
 
     def delete(self, key: str) -> None:
-        """
-        Physically removes the specific cache file and its TTL sidecar from the hard drive.
-
-        Args:
-            key (str): The unique identifier for the cache entry to delete.
-        """
+        """Physically removes the specific cache file and its TTL sidecar."""
         path = self._get_file_path(key)
         lock_path = str(path.with_suffix(".lock"))
 
@@ -137,56 +129,30 @@ class LocalDiskCache(BaseCache):
             self._delete_files(path)
 
     def get_local_cache_name(self) -> str:
-        """
-        Retrieves the absolute or relative path string of the current cache directory.
-
-        Returns:
-            str: The string representation of the cache directory path.
-        """
+        """Retrieves the absolute or relative path string of the current cache directory."""
         return str(self.cache_dir)
 
     def _make_path(self, path: Path) -> None:
-        """
-        Safely creates the directory structure on the OS.
-
-        Args:
-            path (Path): The pathlib.Path object representing the directory to create.
-                Ignores the command if the directory already exists.
-        """
+        """Safely creates the directory structure on the OS."""
         path.mkdir(parents=True, exist_ok=True)
 
     def _get_file_path(self, key: str) -> Path:
-        """
-        Secures the cache key by hashing it into a valid, safe OS filename.
-
-        Args:
-            key (str): The raw string key provided by the user.
-
-        Returns:
-            Path: The full absolute or relative path to the specific .cache file.
-        """
+        """Secures the cache key by hashing it into a valid, safe OS filename."""
         hashed_key = sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{hashed_key}.cache"
 
     # NOTE: - Internal Helper Methods #################################################################
 
-    def _save_payload(self, path: Path, payload: PayloadType) -> None:
+    def _save_payload(self, path: Path, payload: PayloadType, compress: bool) -> None:
         """
         Routes the payload to the appropriate serialization and I/O method based on its type.
-
-        Args:
-            path (Path): The hashed file path where the data should be saved.
-            payload (PayloadType): The data to inspect and route.
-
-        Raises:
-            NotImplementedError: If the payload is an unsupported type or an Iterator.
         """
         if isinstance(payload, str):
-            self._save_str_payload(path, payload)
+            self._save_str_payload(path, payload, compress)
         elif isinstance(payload, bytes):
-            self._save_bytes_payload(path, payload)
+            self._save_bytes_payload(path, payload, compress)
         elif isinstance(payload, (list, dict)):
-            self._save_collection_payload(path, payload)
+            self._save_collection_payload(path, payload, compress)
         elif isinstance(payload, ABCIterator):
             self._save_stream_payload(path, payload)
         else:
@@ -194,117 +160,88 @@ class LocalDiskCache(BaseCache):
                 "This payload type or streaming Iterator is not yet supported."
             )
 
-    def _save_str_payload(self, path: Path, payload: PayloadType) -> None:
+    def _save_str_payload(self, path: Path, payload: str, compress: bool) -> None:
         """
-        Writes a standard Python string to disk using UTF-8 encoding.
-
-        Args:
-            path (Path): The target file path.
-            payload (str): The string data to write.
+        Writes a standard Python string to disk, natively compressing it if requested.
         """
-        path.write_text(payload, encoding="utf-8")
+        if compress:
+            compressed_bytes = gzip.compress(payload.encode("utf-8"))
+            path.write_bytes(compressed_bytes)
+        else:
+            path.write_text(payload, encoding="utf-8")
 
-    def _save_bytes_payload(self, path: Path, payload: PayloadType) -> None:
+    def _save_bytes_payload(self, path: Path, payload: bytes, compress: bool) -> None:
         """
-        Writes raw binary data directly to disk.
-
-        Args:
-            path (Path): The target file path.
-            payload (bytes): The binary data to write.
+        Writes raw binary data directly to disk, compressing if requested.
         """
-        path.write_bytes(payload)
+        if compress:
+            path.write_bytes(gzip.compress(payload))
+        else:
+            path.write_bytes(payload)
 
-    def _save_collection_payload(self, path: Path, payload: PayloadType) -> None:
+    def _save_collection_payload(self, path: Path, payload: list | dict, compress: bool) -> None:
         """
-        Serializes a Python list or dictionary into a JSON string, then saves it.
-
-        Args:
-            path (Path): The target file path.
-            payload (list | dict): The collection to serialize.
+        Serializes a Python collection into JSON, then delegates to string saving (inheriting compression).
         """
         str_collection = json.dumps(payload)
-        self._save_str_payload(path, str_collection)
+        self._save_str_payload(path, str_collection, compress)
 
-    def _save_stream_payload(self, path: Path, payload: PayloadType) -> None:
+    def _save_stream_payload(self, path: Path, payload: ABCIterator) -> None:
         """
-        Streams an iterator of bytes directly to the disk in chunks.
-
-        This method uses unbuffered binary writing to prevent Out-Of-Memory (OOM)
-        errors when caching massive datasets (e.g., 10GB+ files).
-
-        Args:
-            path (Path): The hashed target file path where the stream will be written.
-            payload (PayloadType): A generator or iterator yielding raw bytes.
+        Streams raw bytes to disk. Bypasses compression to maintain memory safety.
         """
         with path.open(mode="wb") as f:
             for chunk in payload:
                 f.write(chunk)
 
-    def _save_meta_file(self, path: Path, ttl_seconds: int | None) -> None:
+    def _save_meta_file(self, path: Path, ttl_seconds: int | None, compress: bool) -> None:
         """
-        Manages the TTL sidecar file for a given cache entry.
-
-        If a TTL is provided, it calculates the expiration and saves a .meta JSON file.
-        If no TTL is provided, it ensures any pre-existing .meta file is deleted so
-        the new cache entry doesn't accidentally inherit an old expiration.
-
-        Args:
-            path (Path): The physical Path object of the base .cache file.
-            ttl_seconds (int | None): The time-to-live in seconds, or None for infinite.
+        Manages the TTL and compression sidecar file.
+        Forces creation if compression is enabled to ensure safe reads.
         """
         meta_path = path.with_suffix(".meta")
 
-        if ttl_seconds is not None:
-            expiration_timestamp = time.time() + ttl_seconds
-            meta_data = self._gen_meta_object(expiration_timestamp, ttl_seconds)
+        if ttl_seconds is not None or compress:
+            expiration_timestamp = (time.time() + ttl_seconds) if ttl_seconds else 0
+            ttl_val = ttl_seconds if ttl_seconds else 0
+
+            meta_data = self._gen_meta_object(expiration_timestamp, ttl_val, compress)
             meta_path.write_text(json.dumps(meta_data), encoding="utf-8")
         else:
-            # Edge Case: Clean up the old sidecar if the new payload has no TTL
             if meta_path.exists():
                 meta_path.unlink()
 
-    def _gen_meta_object(self, expiration_timestamp: float, ttl_seconds: int) -> dict:
-        """
-        Constructs the dictionary payload for the TTL sidecar file.
-
-        Args:
-            expiration_timestamp (float): The exact Unix timestamp when the file expires.
-            ttl_seconds (int): The original TTL duration provided by the user.
-
-        Returns:
-            dict: The standardized schema for the .meta JSON file.
-        """
-        return {"expires_at": expiration_timestamp, "ttl_seconds": ttl_seconds}
+    def _gen_meta_object(
+        self, expiration_timestamp: float, ttl_seconds: int, compress: bool
+    ) -> dict:
+        """Constructs the dictionary payload for the TTL and compression sidecar file."""
+        return {
+            "expires_at": expiration_timestamp,
+            "ttl_seconds": ttl_seconds,
+            "compressed": compress,
+        }
 
     def _is_expired(self, path: Path) -> bool:
         """
         Reads the .meta sidecar file to determine if the cache entry has expired.
-
-        Args:
-            path (Path): The physical Path object of the base .cache file.
-
-        Returns:
-            bool: True if the file has expired, False if it is still valid or has no TTL.
+        Safely ignores files mapped with a 0 expiration timestamp (infinite TTL).
         """
         meta_path = path.with_suffix(".meta")
 
         if not meta_path.exists():
-            # If there is no sidecar file, it means this entry has no TTL and lives forever.
             return False
 
-        # Read the sidecar file and compare the timestamp to the current clock
         meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+        expires_at = meta_data.get("expires_at", 0)
 
-        return time.time() >= meta_data["expires_at"]
+        # 0 means no TTL was provided (it only has a .meta file for compression)
+        if expires_at == 0:
+            return False
+
+        return time.time() >= expires_at
 
     def _delete_files(self, path: Path) -> None:
-        """
-        Internal helper to delete the cache and meta files.
-        NOTE: The caller MUST acquire the CacheLock before executing this.
-
-        Args:
-            path (Path): The physical Path object of the base .cache file.
-        """
+        """Internal helper to safely unlink the cache and meta files."""
         meta_path = path.with_suffix(".meta")
         lock_path = path.with_suffix(".lock")
 
@@ -314,7 +251,6 @@ class LocalDiskCache(BaseCache):
         if meta_path.exists():
             meta_path.unlink()
 
-        # Safely attempt to clean up the lock file (will fail silently if blocked by OS)
         if lock_path.exists():
             try:
                 lock_path.unlink()
