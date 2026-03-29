@@ -26,7 +26,7 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 - [x] Implement AWS S3 cloud cache backend.
 - [x] Add concurrency control (file locking) for parallel workers.
 - [x] Implement compression for large text/XML payloads.
-- [ ] Implement LRU (Least Recently Used) capacity eviction (*LocalDiskCache).
+- [x] Implement LRU (Least Recently Used) capacity eviction (*LocalDiskCache).
 - [ ] Build official documentation site using MkDocs.
 
 ---
@@ -56,6 +56,25 @@ data = cache.get("massive_xml_payload")
 ```
 
 Note: To ensure memory safety and prevent Out-Of-Memory crashes, stream payloads (ABCIterator) deliberately bypass compression.
+
+---
+
+### 🛡️ Capacity Protection (LRU Eviction)
+
+Time-To-Live (TTL) manages *time*, but it doesn't manage *space*. If your pipeline experiences a massive volume spike or a historical backfill, caching thousands of large files could fill your worker's hard drive and crash the host server before the TTL expires.
+
+`LocalDiskCache` includes a Least Recently Used (LRU) capacity ceiling to act as a hard safety valve. By setting `max_entries`, the engine will constantly monitor your disk footprint. If the limit is breached, it automatically identifies and destroys the oldest cache files to make room for new data.
+
+```python
+from etl_pycache.local_cache import LocalDiskCache
+
+# Initialize a cache that will never exceed 1,000 files
+cache = LocalDiskCache(cache_dir="/tmp/safe_cache", max_entries=1000)
+
+# If this is the 1001st item, the engine automatically deletes the oldest
+# file on the hard drive before saving this one.
+cache.set("new_financial_run", massive_payload)
+```
 
 ---
 

@@ -18,15 +18,18 @@ class LocalDiskCache(BaseCache):
     and ensure cross-platform filename compatibility.
     """
 
-    def __init__(self, cache_dir: str = ".cache"):
+    def __init__(self, cache_dir: str = ".cache", max_entries: int | None = None):
         """
         Initializes the cache and ensures the storage directory exists.
 
         Args:
             cache_dir (str, optional): The directory path where the physical cache
                 files will be stored. Defaults to ".cache".
+            max_entries (int | None, optional): The maximum number of cache files allowed.
+                If exceeded, the oldest files are evicted. Defaults to None (infinite).
         """
         self.cache_dir = Path(cache_dir)
+        self.max_entries = max_entries
         self._make_path(self.cache_dir)
 
     def set(
@@ -49,6 +52,9 @@ class LocalDiskCache(BaseCache):
         with CacheLock(lock_path):
             self._save_payload(path, payload, compress)
             self._save_meta_file(path, ttl_seconds, compress)
+
+        # Check if we breached the capacity ceiling
+        self._enforce_capacity()
 
     def get(self, key: str) -> PayloadType | None:
         """
@@ -256,3 +262,29 @@ class LocalDiskCache(BaseCache):
                 lock_path.unlink()
             except OSError:
                 pass
+
+    def _enforce_capacity(self) -> None:
+        """
+        Scans the cache directory and deletes the oldest files if the total count
+        exceeds the max_entries limit.
+        """
+        if self.max_entries is None:
+            return
+
+        cache_files = list(self.cache_dir.glob("*.cache"))
+
+        if len(cache_files) <= self.max_entries:
+            return
+
+        # Sort files by their OS modification time (Oldest first)
+        cache_files.sort(key=lambda p: p.stat().st_mtime)
+
+        # Calculate how many files we need to destroy
+        excess_count = len(cache_files) - self.max_entries
+
+        for i in range(excess_count):
+            oldest_file = cache_files[i]
+            lock_path = str(oldest_file.with_suffix(".lock"))
+
+            with CacheLock(lock_path):
+                self._delete_files(oldest_file)
