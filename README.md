@@ -18,15 +18,27 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 * **Developer Velocity:** Rapidly debug downstream load operations without waiting for upstream transformations to finish.
 * **Polymorphic By Design:** Natively supports strings, bytes, dictionaries, lists, and byte streams without requiring manual serialization before caching.
 
+---
+
+### 🔒 Enterprise Concurrency (File Locking)
+
+`etl-pycache` is built for distributed data pipelines. The `LocalDiskCache` engine features a custom, zero-dependency, OS-native file locking mechanism. 
+
+Whether you are running 50 parallel Airflow workers on Linux or local threads on Windows, the cache automatically coordinates Read/Write access using `fcntl` (POSIX) or `msvcrt` (Windows). 
+
+**Zero configuration is required.** The locking is completely transparent to the developer. If multiple workers target the exact same cache key simultaneously, the engine automatically queues them to prevent file corruption and deadlocks, raising a timeout only if a worker holds a lock for an abnormal duration.
+
+---
+
 ## 🚦 Roadmap (Towards V1.0.0)
 
 - [x] Define abstract base interface and project scaffolding.
 - [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
 - [x] Implement TTL (Time-To-Live) expiration policies.
 - [x] Implement AWS S3 cloud cache backend.
-- [ ] Implement LRU (Least Recently Used) capacity eviction.
-- [ ] Add concurrency control (file locking) for parallel workers.
+- [x] Add concurrency control (file locking) for parallel workers.
 - [ ] Implement compression for large text/XML payloads.
+- [ ] Implement LRU (Least Recently Used) capacity eviction.
 - [ ] Build official documentation site using MkDocs.
 
 ---

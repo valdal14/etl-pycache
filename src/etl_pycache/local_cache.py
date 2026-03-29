@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from .interfaces import BaseCache, PayloadType
+from .lock_manager import CacheLock
 
 
 class LocalDiskCache(BaseCache):
@@ -42,8 +43,12 @@ class LocalDiskCache(BaseCache):
                 If provided, the cache entry will expire and be deleted after this time.
         """
         path = self._get_file_path(key)
-        self._save_payload(path, payload)
-        self._save_meta_file(path, ttl_seconds)
+        lock_path = str(path.with_suffix(".lock"))
+
+        # Lock the entire transaction (Payload + Meta file)
+        with CacheLock(lock_path):
+            self._save_payload(path, payload)
+            self._save_meta_file(path, ttl_seconds)
 
     def get(self, key: str) -> PayloadType | None:
         """
@@ -56,36 +61,30 @@ class LocalDiskCache(BaseCache):
             PayloadType | None: The cached data, or None if the file does not exist.
         """
         path = self._get_file_path(key)
+        lock_path = str(path.with_suffix(".lock"))
 
-        # check if the cache exists
-        if not path.exists():
-            return None
+        with CacheLock(lock_path):
+            if not path.exists():
+                return None
 
-        # check if the meta file exists
-        if self._is_expired(path):
-            self.delete(key)
-            return None
+            if self._is_expired(path):
+                # Use the unlocked helper to prevent a Deadlock!
+                self._delete_files(path)
+                return None
 
-        raw_data = path.read_bytes()
+            raw_data = path.read_bytes()
 
+        # NOTE: Deserialization happens OUTSIDE the lock to free up the file faster
         try:
-            # Attempt to decode as standard text
             text_data = raw_data.decode("utf-8")
             try:
-                # Attempt to parse as a JSON collection
                 parsed_json = json.loads(text_data)
-
                 if isinstance(parsed_json, (dict, list)):
                     return parsed_json
-
-                # If it parsed a primitive, fall back to the string
                 return text_data
-
             except json.JSONDecodeError:
-                # return a string
                 return text_data
         except UnicodeDecodeError:
-            # returns raw binary data that cannot be read as text
             return raw_data
 
     def get_stream(self, key: str, chunk_size: int = 65536) -> ABCIterator | None:
@@ -104,20 +103,23 @@ class LocalDiskCache(BaseCache):
             ABCIterator | None: A generator yielding raw bytes, or None if missing.
         """
         path = self._get_file_path(key)
+        lock_path = str(path.with_suffix(".lock"))
 
-        # check if the cache exists
-        if not path.exists():
-            return None
+        # Check existence and expiration safely
+        with CacheLock(lock_path):
+            if not path.exists():
+                return None
 
-        # check if the meta file exists
-        if self._is_expired(path):
-            self.delete(key)
-            return None
+            if self._is_expired(path):
+                self._delete_files(path)
+                return None
 
+        # Lock the file continuously while yielding chunks
         def _stream_generator() -> ABCIterator:
-            with path.open(mode="rb") as f:
-                while chunk := f.read(chunk_size):
-                    yield chunk
+            with CacheLock(lock_path):
+                with path.open(mode="rb") as f:
+                    while chunk := f.read(chunk_size):
+                        yield chunk
 
         return _stream_generator()
 
@@ -129,13 +131,10 @@ class LocalDiskCache(BaseCache):
             key (str): The unique identifier for the cache entry to delete.
         """
         path = self._get_file_path(key)
-        meta_path = path.with_suffix(".meta")
+        lock_path = str(path.with_suffix(".lock"))
 
-        if path.exists():
-            path.unlink()
-
-        if meta_path.exists():
-            meta_path.unlink()
+        with CacheLock(lock_path):
+            self._delete_files(path)
 
     def get_local_cache_name(self) -> str:
         """
@@ -297,3 +296,27 @@ class LocalDiskCache(BaseCache):
         meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
 
         return time.time() >= meta_data["expires_at"]
+
+    def _delete_files(self, path: Path) -> None:
+        """
+        Internal helper to delete the cache and meta files.
+        NOTE: The caller MUST acquire the CacheLock before executing this.
+
+        Args:
+            path (Path): The physical Path object of the base .cache file.
+        """
+        meta_path = path.with_suffix(".meta")
+        lock_path = path.with_suffix(".lock")
+
+        if path.exists():
+            path.unlink()
+
+        if meta_path.exists():
+            meta_path.unlink()
+
+        # Safely attempt to clean up the lock file (will fail silently if blocked by OS)
+        if lock_path.exists():
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
