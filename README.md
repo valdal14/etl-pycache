@@ -1,6 +1,7 @@
 # etl-pycache
 
 [![CI Pipeline](https://github.com/valdal14/etl-pycache/actions/workflows/ci.yml/badge.svg)](https://github.com/valdal14/etl-pycache/actions/workflows/ci.yml)
+[![Documentation](https://img.shields.io/badge/docs-MkDocs-blue.svg)](https://valdal14.github.io/etl-pycache/)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat&logo=python)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -17,17 +18,6 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 * **Cost Efficiency:** Prevents paying for the exact same compute or API queries twice during a retry.
 * **Developer Velocity:** Rapidly debug downstream load operations without waiting for upstream transformations to finish.
 * **Polymorphic By Design:** Natively supports strings, bytes, dictionaries, lists, and byte streams without requiring manual serialization before caching.
-
-## 🚦 Roadmap (Towards V1.0.0)
-
-- [x] Define abstract base interface and project scaffolding.
-- [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
-- [x] Implement TTL (Time-To-Live) expiration policies.
-- [x] Implement AWS S3 cloud cache backend.
-- [x] Add concurrency control (file locking) for parallel workers.
-- [x] Implement compression for large text/XML payloads.
-- [x] Implement LRU (Least Recently Used) capacity eviction (*LocalDiskCache).
-- [ ] Build official documentation site using MkDocs.
 
 ---
 
