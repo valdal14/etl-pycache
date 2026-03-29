@@ -36,9 +36,9 @@ Whether you are running 50 parallel Airflow workers on Linux or local threads on
 - [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
 - [x] Implement TTL (Time-To-Live) expiration policies.
 - [x] Implement AWS S3 cloud cache backend.
-- [ ] Implement LRU (Least Recently Used) capacity eviction.
-- [ ] Add concurrency control (file locking) for parallel workers.
+- [x] Add concurrency control (file locking) for parallel workers.
 - [ ] Implement compression for large text/XML payloads.
+- [ ] Implement LRU (Least Recently Used) capacity eviction.
 - [ ] Build official documentation site using MkDocs.
 
 ---
