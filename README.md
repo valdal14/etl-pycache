@@ -18,6 +18,17 @@ Data pipelines frequently make expensive API calls, run heavy transformations, a
 * **Developer Velocity:** Rapidly debug downstream load operations without waiting for upstream transformations to finish.
 * **Polymorphic By Design:** Natively supports strings, bytes, dictionaries, lists, and byte streams without requiring manual serialization before caching.
 
+## 🚦 Roadmap (Towards V1.0.0)
+
+- [x] Define abstract base interface and project scaffolding.
+- [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
+- [x] Implement TTL (Time-To-Live) expiration policies.
+- [x] Implement AWS S3 cloud cache backend.
+- [x] Add concurrency control (file locking) for parallel workers.
+- [x] Implement compression for large text/XML payloads.
+- [ ] Implement LRU (Least Recently Used) capacity eviction (*LocalDiskCache).
+- [ ] Build official documentation site using MkDocs.
+
 ---
 
 ### 🔒 Enterprise Concurrency (File Locking)
@@ -30,16 +41,21 @@ Whether you are running 50 parallel Airflow workers on Linux or local threads on
 
 ---
 
-## 🚦 Roadmap (Towards V1.0.0)
+### 🗜️ Native Payload Compression
 
-- [x] Define abstract base interface and project scaffolding.
-- [x] Implement local disk caching logic with polymorphic serialization and memory-safe streaming.
-- [x] Implement TTL (Time-To-Live) expiration policies.
-- [x] Implement AWS S3 cloud cache backend.
-- [x] Add concurrency control (file locking) for parallel workers.
-- [ ] Implement compression for large text/XML payloads.
-- [ ] Implement LRU (Least Recently Used) capacity eviction.
-- [ ] Build official documentation site using MkDocs.
+XML and JSON payloads are notoriously verbose. `etl-pycache` includes a native, zero-dependency compression engine using Python's built-in `gzip` library. 
+
+By simply passing `compress=True` to the `set` method, the engine will aggressively compress your data *before* writing it to the local disk or streaming it over the network to AWS S3. 
+
+```python
+# A 100MB XML string will be shrunk down to ~12MB on your hard drive or S3 bucket
+cache.set("massive_xml_payload", my_xml_string, compress=True)
+
+# The get() method automatically detects the compression flag and decompresses on the fly
+data = cache.get("massive_xml_payload")
+```
+
+Note: To ensure memory safety and prevent Out-Of-Memory crashes, stream payloads (ABCIterator) deliberately bypass compression.
 
 ---
 
@@ -199,6 +215,58 @@ cache.set("my_folder/financial_data", my_byte_generator, ttl_seconds=3600)
 # 3. Retrieve the stream directly from the cloud
 # Returns a boto3 StreamingBody that flawlessly implements the Python Iterator protocol
 stream = cache.get_stream("my_folder/financial_data")
+```
+
+---
+
+## 🚀 Quick Start: The Developer Cheat Sheet
+
+`etl-pycache` provides a completely unified developer experience. Whether you are caching to a local hard drive for an Airflow worker, or streaming compressed data to AWS S3, the method signatures remain exactly the same.
+
+Here is a complete, real-world example of caching a massive payload with both TTL expiration and native compression:
+
+```python
+import boto3
+from etl_pycache.local_cache import LocalDiskCache
+from etl_pycache.s3_cache import S3Cache
+
+# ==========================================
+# 1. INITIALIZATION
+# ==========================================
+
+# Local Disk (Perfect for local workers or Celery)
+local_cache = LocalDiskCache(cache_dir="/tmp/my_etl_cache")
+
+# AWS S3 (Perfect for distributed cloud sharing)
+s3_client = boto3.client("s3", region_name="eu-west-1")
+cloud_cache = S3Cache(bucket_name="canda-anaplan-demo", client=s3_client)
+
+# ==========================================
+# 2. WRITING DATA (TTL + Compression)
+# ==========================================
+my_massive_xml_payload = "<dataset>... 500MB of data ...</dataset>"
+
+# Save locally: Expires in 1 hour, shrunk by ~80% on disk, locked for OS concurrency
+local_cache.set("financial_run_001", my_massive_xml_payload, ttl_seconds=3600, compress=True)
+
+# Save to Cloud: Expires in 1 hour, shrunk by ~80% before upload to save AWS costs
+cloud_cache.set("deve/financial_run_001", my_massive_xml_payload, ttl_seconds=3600, compress=True)
+
+# ==========================================
+# 3. READING DATA
+# ==========================================
+
+# You do NOT need to check if the file is expired or compressed!
+# The engine automatically validates the TTL, deletes it if expired, 
+# and decompresses the bytes on the fly before returning your data.
+
+local_data = local_cache.get("financial_run_001")
+if local_data:
+    print("Successfully read and decompressed from local disk!")
+
+cloud_data = cloud_cache.get("deve/financial_run_001")
+if cloud_data:
+    print("Successfully read and decompressed from AWS S3!")
 ```
 
 ---

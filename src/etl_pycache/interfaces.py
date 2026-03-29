@@ -7,7 +7,9 @@ PayloadType = str | bytes | dict | list | Iterator[bytes]
 
 class BaseCache(ABC):
     @abstractmethod
-    def set(self, key: str, payload: PayloadType, ttl_seconds: int | None = None) -> None:
+    def set(
+        self, key: str, payload: PayloadType, ttl_seconds: int | None = None, compress: bool = False
+    ) -> None:
         """
         Saves the payload to the cache.
 
@@ -17,6 +19,7 @@ class BaseCache(ABC):
                 bytes, dict, list, or a byte stream.
             ttl_seconds (int | None, optional): The Time-To-Live in seconds.
                 If provided, the cache entry will expire and be deleted after this time.
+            compress (bool): Reduce storage footprint and network I/O if set to True
         """
         pass
 
