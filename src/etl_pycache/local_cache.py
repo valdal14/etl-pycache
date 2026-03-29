@@ -306,7 +306,7 @@ class LocalDiskCache(BaseCache):
             path (Path): The physical Path object of the base .cache file.
         """
         meta_path = path.with_suffix(".meta")
-        lock_path = path.with_suffix(".lock")  # Define the lock path
+        lock_path = path.with_suffix(".lock")
 
         if path.exists():
             path.unlink()
